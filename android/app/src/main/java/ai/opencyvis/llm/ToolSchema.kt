@@ -120,6 +120,25 @@ object ToolSchema {
         return JSONArray().put(phoneActionTool())
     }
 
+    /**
+     * OpenAI Responses API tool schema.
+     * Responses expects: {type:"function", name, description, parameters}
+     * (no nested "function" object).
+     */
+    fun responsesPhoneActionTool(): JSONObject {
+        val fn = phoneActionTool().getJSONObject("function")
+        return JSONObject().apply {
+            put("type", "function")
+            put("name", fn.getString("name"))
+            put("description", fn.getString("description"))
+            put("parameters", fn.getJSONObject("parameters"))
+        }
+    }
+
+    fun responsesToolsArray(): JSONArray {
+        return JSONArray().put(responsesPhoneActionTool())
+    }
+
     fun anthropicPhoneActionTool(): JSONObject {
         return JSONObject().apply {
             put("name", "phone_action")

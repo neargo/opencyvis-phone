@@ -29,6 +29,11 @@ android {
         versionCode = 100
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Emulator target is arm64; reduce APK size for /system/priv-app installs.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     buildTypes {
@@ -64,6 +69,25 @@ android {
 
     androidResources {
         noCompress += listOf("onnx", "model")
+    }
+
+    // Keep the system-priv-app build small: drop offline ASR payload and JNI libs.
+    // Voice input becomes a no-op (handled gracefully in VoiceInputController).
+    packaging {
+        resources {
+            // Best-effort: exclude bundled ASR assets from the APK.
+            excludes += setOf(
+                "assets/asr/**",
+                "**/assets/asr/**"
+            )
+        }
+        jniLibs {
+            excludes += setOf(
+                "**/libonnxruntime.so",
+                "**/libonnxruntime4j_jni.so",
+                "**/libsherpa-onnx-jni.so"
+            )
+        }
     }
 }
 

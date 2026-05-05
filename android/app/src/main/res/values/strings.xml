@@ -81,5 +81,7 @@
     <string name="notif_open_app">Open OpenCyvis</string>
     <string name="notif_channel_ask">OpenCyvis Questions</string>
     <string name="notif_channel_ask_desc">High-priority alerts when the agent is waiting for your answer</string>
+    <string name="notif_task_completed">Task completed</string>
+    <string name="notif_task_failed_title">Task failed</string>
     <string name="notif_max_steps_reached">Max steps reached (%1$d)</string>
 </resources>

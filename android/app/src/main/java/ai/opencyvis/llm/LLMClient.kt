@@ -23,7 +23,9 @@ import java.util.concurrent.TimeUnit
 class LLMClient(
     private val apiKey: String,
     private val model: String,
-    private val baseUrl: String
+    private val baseUrl: String,
+    private val wireApi: String,
+    private val reasoningEffort: String
 ) : LLMClientInterface {
 
     companion object {
@@ -54,36 +56,67 @@ class LLMClient(
      */
     override suspend fun chatWithTools(messages: List<Map<String, Any>>): Map<String, Any?> =
         withContext(Dispatchers.IO) {
-            val messagesArray = convertMessagesToJson(messages)
+            val chatMessagesArray = convertMessagesToChatJson(messages)
+            val responsesInputArray = convertMessagesToResponsesInputJson(messages)
             var maxTokens = MAX_OUTPUT_TOKENS
+            val normalizedWireApi = wireApi.trim().lowercase().ifEmpty { ai.opencyvis.config.ConfigRepository.WIRE_API_AUTO }
 
             for (attempt in 0 until MAX_RETRIES) {
                 try {
-                    val payload = JSONObject().apply {
-                        put("model", model)
-                        put("messages", messagesArray)
-                        put("max_tokens", maxTokens)
-                        put("temperature", TEMPERATURE)
-                        put("tools", ToolSchema.toolsArray())
-                        put("tool_choice", "required")
-                        put("stream", true)
-                    }
+                    val (urlPath, payload) = buildRequest(chatMessagesArray, responsesInputArray, maxTokens)
 
                     val payloadStr = payload.toString()
-                    Log.d(TAG, "Request to $baseUrl/chat/completions (attempt ${attempt + 1}), payload ${payloadStr.length} chars, stream=true")
+                    Log.d(TAG, "Request to ${joinUrl(baseUrl, urlPath)} (attempt ${attempt + 1}), payload ${payloadStr.length} chars, stream=true")
 
-                    val request = Request.Builder()
-                        .url("$baseUrl/chat/completions")
+                    val reqBuilder = Request.Builder()
+                        .url(joinUrl(baseUrl, urlPath))
                         .post(payloadStr.toRequestBody(JSON_MEDIA_TYPE))
-                        .addHeader("Authorization", "Bearer $apiKey")
-                        .build()
 
-                    val response = httpClient.newCall(request).execute()
+                    if (apiKey.isNotBlank()) {
+                        reqBuilder.addHeader("Authorization", "Bearer $apiKey")
+                    }
+
+                    val request = reqBuilder.build()
+
+                    var response = httpClient.newCall(request).execute()
                     val code = response.code
 
                     if (code !in 200..299) {
                         val errorBody = response.body?.string()?.take(500) ?: ""
                         response.close()
+
+                        // AUTO mode: if /responses is not supported by the endpoint, fall back to /chat/completions.
+                        if (
+                            normalizedWireApi == ai.opencyvis.config.ConfigRepository.WIRE_API_AUTO &&
+                            urlPath == "responses" &&
+                            (code == 404 || code == 405 || shouldFallbackFromResponses400(code, errorBody))
+                        ) {
+                            Log.w(TAG, "Endpoint does not support /responses (HTTP $code), falling back to /chat/completions")
+                            val fallbackPayload = buildChatCompletionsPayload(chatMessagesArray, maxTokens)
+                            val fallbackReqBuilder = Request.Builder()
+                                .url(joinUrl(baseUrl, "chat/completions"))
+                                .post(fallbackPayload.toString().toRequestBody(JSON_MEDIA_TYPE))
+                            if (apiKey.isNotBlank()) {
+                                fallbackReqBuilder.addHeader("Authorization", "Bearer $apiKey")
+                            }
+                            response = httpClient.newCall(fallbackReqBuilder.build()).execute()
+                            val fbCode = response.code
+                            if (fbCode !in 200..299) {
+                                val fbError = response.body?.string()?.take(500) ?: ""
+                                response.close()
+                                throw LLMException("LLM API error ($fbCode): $fbError")
+                            }
+
+                            val fbResult = parseSSEStream(response)
+                            if (fbResult != null) return@withContext fbResult
+                            response.close()
+                            if (attempt < MAX_RETRIES - 1) {
+                                Log.w(TAG, "Stream parse returned null after chat fallback, retrying with more tokens")
+                                maxTokens *= 2
+                                continue
+                            }
+                            throw LLMException("Cannot parse LLM streaming response")
+                        }
 
                         if (code in 400..499 && code != 429) {
                             throw LLMException("LLM API error ($code): $errorBody")
@@ -127,6 +160,79 @@ class LLMClient(
 
             throw LLMException("LLM API call failed: exhausted retries")
         }
+
+    private fun buildRequest(
+        chatMessagesArray: JSONArray,
+        responsesInputArray: JSONArray,
+        maxTokens: Int
+    ): Pair<String, JSONObject> {
+        // auto => try /responses first and fallback to /chat/completions if needed
+        val normalized = wireApi.trim().lowercase().ifEmpty { "auto" }
+        return when (normalized) {
+            ai.opencyvis.config.ConfigRepository.WIRE_API_CHAT_COMPLETIONS -> {
+                "chat/completions" to buildChatCompletionsPayload(chatMessagesArray, maxTokens)
+            }
+            ai.opencyvis.config.ConfigRepository.WIRE_API_RESPONSES -> {
+                "responses" to buildResponsesPayload(responsesInputArray, maxTokens)
+            }
+            else -> {
+                // AUTO: prefer responses; caller will handle fallback on 404/405 by retrying with chat.
+                "responses" to buildResponsesPayload(responsesInputArray, maxTokens)
+            }
+        }
+    }
+
+    private fun buildChatCompletionsPayload(messagesArray: JSONArray, maxTokens: Int): JSONObject {
+        return JSONObject().apply {
+            put("model", model)
+            put("messages", messagesArray)
+            put("max_tokens", maxTokens)
+            put("temperature", TEMPERATURE)
+            put("tools", ToolSchema.toolsArray())
+            put("tool_choice", "required")
+            put("stream", true)
+        }
+    }
+
+    private fun buildResponsesPayload(inputArray: JSONArray, maxTokens: Int): JSONObject {
+        return JSONObject().apply {
+            put("model", model)
+            // Responses API uses `input` instead of `messages`.
+            put("input", inputArray)
+            // Many proxies accept either `max_output_tokens` or `max_tokens`.
+            put("max_output_tokens", maxTokens)
+            put("temperature", TEMPERATURE)
+            put("tools", ToolSchema.responsesToolsArray())
+            // Responses API supports structured tool_choice; be explicit for better compatibility.
+            put("tool_choice", JSONObject().put("type", "function").put("name", "phone_action"))
+            put("stream", true)
+
+            if (reasoningEffort.isNotBlank()) {
+                put(
+                    "reasoning",
+                    JSONObject().put("effort", reasoningEffort.trim().lowercase())
+                )
+            }
+        }
+    }
+
+    /**
+     * Some OpenAI-compatible proxies expose /responses but only accept the official Responses input schema.
+     * In AUTO mode, fall back to /chat/completions when /responses rejects the request format.
+     */
+    private fun shouldFallbackFromResponses400(code: Int, errorBody: String): Boolean {
+        if (code != 400) return false
+        val msg = errorBody.lowercase()
+        return msg.contains("invalid responses request") ||
+            msg.contains("invalid request format") ||
+            msg.contains("responses request")
+    }
+
+    private fun joinUrl(base: String, path: String): String {
+        val b = base.trimEnd('/')
+        val p = path.trimStart('/')
+        return "$b/$p"
+    }
 
     /**
      * Parse SSE stream from the OpenAI-compatible /chat/completions API.
@@ -266,7 +372,7 @@ class LLMClient(
      * Convert messages list to JSONArray in OpenAI chat/completions format.
      * Handles nested Maps (e.g. image_url: {url: "..."}).
      */
-    private fun convertMessagesToJson(messages: List<Map<String, Any>>): JSONArray {
+    private fun convertMessagesToChatJson(messages: List<Map<String, Any>>): JSONArray {
         val array = JSONArray()
         for (msg in messages) {
             val jsonMsg = JSONObject()
@@ -289,6 +395,88 @@ class LLMClient(
             array.put(jsonMsg)
         }
         return array
+    }
+
+    /**
+     * Convert the app's OpenAI chat-format messages into OpenAI Responses API input format.
+     *
+     * - text => {type:"input_text", text:"..."}
+     * - image_url => {type:"input_image", image_url:"data:image/..."}
+     */
+    private fun convertMessagesToResponsesInputJson(messages: List<Map<String, Any>>): JSONArray {
+        val input = JSONArray()
+
+        for (msg in messages) {
+            val role = (msg["role"] as? String)?.trim().orEmpty().ifEmpty { "user" }
+            val isAssistant = role.equals("assistant", ignoreCase = true)
+            // This proxy validates content item types based on role:
+            // - user/system/tool => input_text / input_image
+            // - assistant        => output_text / refusal
+            val textType = if (isAssistant) "output_text" else "input_text"
+
+            val item = JSONObject().apply { put("role", role) }
+
+            when (val content = msg["content"]) {
+                is String -> {
+                    item.put(
+                        "content",
+                        JSONArray().put(JSONObject().put("type", textType).put("text", content))
+                    )
+                }
+                is List<*> -> {
+                    val parts = JSONArray()
+                    for (blockAny in content) {
+                        val block = blockAny as? Map<*, *> ?: continue
+                        val type = block["type"] as? String
+                        when (type) {
+                            "text" -> {
+                                val text = block["text"] as? String ?: ""
+                                if (text.isNotEmpty()) {
+                                    parts.put(JSONObject().put("type", textType).put("text", text))
+                                }
+                            }
+                            "image_url" -> {
+                                // Only user messages carry images into the model.
+                                if (isAssistant) continue
+                                val imageUrl = block["image_url"]
+                                val url = when (imageUrl) {
+                                    is Map<*, *> -> imageUrl["url"] as? String ?: ""
+                                    is String -> imageUrl
+                                    else -> ""
+                                }
+                                if (url.isNotEmpty()) {
+                                    parts.put(JSONObject().put("type", "input_image").put("image_url", url))
+                                }
+                            }
+                            else -> {
+                                // Best-effort: if it looks like a text block, keep it.
+                                val text = block["text"] as? String
+                                if (!text.isNullOrEmpty()) {
+                                    parts.put(JSONObject().put("type", textType).put("text", text))
+                                }
+                            }
+                        }
+                    }
+
+                    // Ensure at least one content part exists (Responses requires content array).
+                    if (parts.length() == 0) {
+                        parts.put(JSONObject().put("type", textType).put("text", ""))
+                    }
+                    item.put("content", parts)
+                }
+                else -> {
+                    val fallback = content?.toString() ?: ""
+                    item.put(
+                        "content",
+                        JSONArray().put(JSONObject().put("type", textType).put("text", fallback))
+                    )
+                }
+            }
+
+            input.put(item)
+        }
+
+        return input
     }
 
     /** Recursively convert a Map to JSONObject, handling nested Maps. */

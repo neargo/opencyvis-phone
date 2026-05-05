@@ -286,7 +286,9 @@ class AgentService : Service() {
             else -> LLMClient(
                 apiKey = config.apiKey,
                 model = config.model,
-                baseUrl = config.baseUrl
+                baseUrl = config.baseUrl,
+                wireApi = config.wireApi,
+                reasoningEffort = config.reasoningEffort
             )
         }
 

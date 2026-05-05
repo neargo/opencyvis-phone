@@ -13,10 +13,17 @@ class ConfigRepository(context: Context) {
         private const val KEY_MAX_STEPS = "max_steps"
         private const val KEY_API_PROVIDER = "api_provider"
         private const val KEY_DEBUG_MODE = "debug_mode"
+        private const val KEY_WIRE_API = "wire_api"
+        private const val KEY_REASONING_EFFORT = "reasoning_effort"
 
         const val PROVIDER_OPENAI = "openai"
         const val PROVIDER_ANTHROPIC = "anthropic"
         const val PROVIDER_OLLAMA = "ollama"
+
+        // LLM wire protocol
+        const val WIRE_API_AUTO = "auto"          // try /responses first, fall back to /chat/completions
+        const val WIRE_API_RESPONSES = "responses"
+        const val WIRE_API_CHAT_COMPLETIONS = "chat_completions"
         const val DEFAULT_MODEL = "gpt-5.5"
         const val DEFAULT_BASE_URL = "https://api.openai.com/v1"
         const val DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-7-20250415"
@@ -59,4 +66,22 @@ class ConfigRepository(context: Context) {
     var debugMode: Boolean
         get() = prefs.getBoolean(KEY_DEBUG_MODE, false)
         set(value) = prefs.edit().putBoolean(KEY_DEBUG_MODE, value).apply()
+
+    /**
+     * Which OpenAI-compatible wire API to call.
+     * - auto: try /responses, fall back to /chat/completions
+     * - responses: force /responses
+     * - chat_completions: force /chat/completions
+     */
+    var wireApi: String
+        get() = prefs.getString(KEY_WIRE_API, WIRE_API_AUTO) ?: WIRE_API_AUTO
+        set(value) = prefs.edit().putString(KEY_WIRE_API, value).apply()
+
+    /**
+     * Optional reasoning effort hint for models that support it (e.g. GPT via Responses API).
+     * Expected values: low/medium/high/xhigh (provider-specific).
+     */
+    var reasoningEffort: String
+        get() = prefs.getString(KEY_REASONING_EFFORT, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_REASONING_EFFORT, value).apply()
 }

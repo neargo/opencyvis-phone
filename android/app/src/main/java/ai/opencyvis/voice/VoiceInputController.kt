@@ -33,7 +33,15 @@ class VoiceInputController(
         originalText = textTarget.getText()
         isListening = true
         listener.onListeningChanged(true)
-        engine.startListening(engineListener)
+        try {
+            engine.startListening(engineListener)
+        } catch (e: Throwable) {
+            // If optional ASR dependencies are removed from the build, starting can throw
+            // UnsatisfiedLinkError / ClassNotFoundError. Fail gracefully.
+            textTarget.setText(originalText)
+            listener.onError(e.message ?: "Voice input unavailable")
+            finishListening()
+        }
     }
 
     fun stop() {

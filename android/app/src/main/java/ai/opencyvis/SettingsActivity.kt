@@ -244,6 +244,8 @@ class SettingsActivity : AppCompatActivity() {
             Model: ${imported.model}
             Base URL: ${imported.baseUrl}
             Max steps: ${imported.maxSteps ?: config.maxSteps}
+            Wire API: ${imported.wireApi}
+            Reasoning effort: ${imported.reasoningEffort.ifBlank { "(default)" }}
             API key: ${ConfigDeepLink.redactedApiKey(imported.apiKey)}
         """.trimIndent()
 
@@ -264,6 +266,8 @@ class SettingsActivity : AppCompatActivity() {
         config.model = imported.model
         config.baseUrl = imported.baseUrl
         imported.maxSteps?.let { config.maxSteps = it }
+        config.wireApi = imported.wireApi
+        config.reasoningEffort = imported.reasoningEffort
         refreshConfigFields()
     }
 
