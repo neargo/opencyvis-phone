@@ -208,6 +208,32 @@ class AppLauncher(private val context: Context, private val displayId: Int = 0) 
     }
 
     /**
+     * Open a URL via ACTION_VIEW, optionally forcing a specific package.
+     * Launches on [displayId] when non-zero.
+     */
+    fun openUrl(url: String, packageName: String? = null): LaunchResult {
+        return try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                if (!packageName.isNullOrBlank()) {
+                    setPackage(packageName)
+                }
+                addFlags(launchFlagsForDisplay(displayId))
+            }
+            context.startActivity(intent, launchOptionsBundle())
+            val pkg = packageName
+                ?: intent.component?.packageName
+                ?: intent.`package`
+            LaunchResult(
+                "Opened URL" + if (displayId != 0) " on display $displayId" else "",
+                pkg
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to open url=$url", e)
+            LaunchResult("Failed to open URL: ${e.message}", null)
+        }
+    }
+
+    /**
      * Try a list of candidate package names; launch the first one that's installed.
      * Returns null if none are installed (so the caller can fall through to label search).
      */

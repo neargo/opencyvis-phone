@@ -46,6 +46,7 @@ class ControlPanelActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "ControlPanel"
         private const val REQUEST_RECORD_AUDIO = 2001
+        private const val EXTRA_INSTRUCTION = "instruction"
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -74,6 +75,9 @@ class ControlPanelActivity : AppCompatActivity() {
     private lateinit var voiceInputController: VoiceInputController
     private var voiceTestReceiverRegistered = false
 
+    // For adb/script automation: allow starting an agent via intent extra.
+    private var pendingInstruction: String? = null
+
     private val voiceTestReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val target = intent.getStringExtra(VoiceInputTestBridge.EXTRA_TARGET)
@@ -93,6 +97,9 @@ class ControlPanelActivity : AppCompatActivity() {
             bound = true
             Log.i(TAG, "Bound to AgentService")
             subscribeToEngineFlow()
+
+            // If launched with an instruction (e.g. from local script), start immediately.
+            maybeStartPendingInstruction()
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -241,6 +248,9 @@ class ControlPanelActivity : AppCompatActivity() {
         // Start and bind AgentService
         ensureServiceStarted()
 
+        // If started via adb with an instruction extra, queue it.
+        handleStartInstruction(intent)
+
         // Show ready message only if no recent history (otherwise idle state shows recent tasks)
         scope.launch {
             val recent = historyRepo.getRecentConversations(1)
@@ -259,6 +269,31 @@ class ControlPanelActivity : AppCompatActivity() {
         if (intent.getBooleanExtra(AgentService.EXTRA_FOCUS_ASK, false)) {
             chatRecycler.post { scrollChatToBottom() }
         }
+    }
+
+    private fun handleStartInstruction(intent: Intent?) {
+        val raw = intent?.getStringExtra(EXTRA_INSTRUCTION) ?: return
+        val instruction = raw.trim()
+        if (instruction.isEmpty()) return
+        pendingInstruction = instruction
+        // Avoid re-trigger on subsequent intent reads.
+        intent.removeExtra(EXTRA_INSTRUCTION)
+        maybeStartPendingInstruction()
+    }
+
+    private fun maybeStartPendingInstruction() {
+        val instruction = pendingInstruction ?: return
+        val service = agentService ?: return
+        pendingInstruction = null
+
+        chatAdapter.addMessage(ChatMessage(MessageType.USER_INPUT, instruction))
+        ensureServiceStarted()
+        service.startAgent(instruction)
+        editInput.text.clear()
+        actionButtons.visibility = View.VISIBLE
+        hideRecentTasks()
+        scrollChatToBottom()
+        Log.i(TAG, "Started agent from ControlPanelActivity intent")
     }
 
     override fun onDestroy() {
@@ -489,6 +524,7 @@ class ControlPanelActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        handleStartInstruction(intent)
         if (intent.getBooleanExtra(AgentService.EXTRA_FOCUS_ASK, false)) {
             scrollChatToBottom()
         }

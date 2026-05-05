@@ -24,6 +24,7 @@ object ToolSchema {
                         put("enum", JSONArray().apply {
                             put("tap")
                             put("open_app")
+                            put("open_url")
                             put("swipe")
                             put("key_event")
                             put("type_text")
@@ -48,6 +49,14 @@ object ToolSchema {
                     put("app_name", JSONObject().apply {
                         put("type", "string")
                         put("description", LlmPrompts.paramDescription("app_name"))
+                    })
+                    put("url", JSONObject().apply {
+                        put("type", "string")
+                        put("description", LlmPrompts.paramDescription("url"))
+                    })
+                    put("package_name", JSONObject().apply {
+                        put("type", "string")
+                        put("description", LlmPrompts.paramDescription("package_name"))
                     })
                     put("direction", JSONObject().apply {
                         put("type", "string")

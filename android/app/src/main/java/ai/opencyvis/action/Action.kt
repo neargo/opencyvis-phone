@@ -23,6 +23,12 @@ sealed class Action(val typeName: String, open val thought: String) {
         override val thought: String = ""
     ) : Action("open_app", thought)
 
+    data class OpenUrl(
+        val url: String,
+        val packageName: String? = null,
+        override val thought: String = ""
+    ) : Action("open_url", thought)
+
     data class Swipe(
         val direction: String,
         override val thought: String = ""
@@ -98,6 +104,13 @@ sealed class Action(val typeName: String, open val thought: String) {
                 )
                 "open_app" -> OpenApp(
                     appName = (map["app_name"] as? String) ?: "",
+                    thought = thought
+                )
+                "open_url" -> OpenUrl(
+                    url = (map["url"] as? String)
+                        ?: (map["text"] as? String)
+                        ?: throw IllegalArgumentException("open_url action missing required field 'url'"),
+                    packageName = (map["package_name"] as? String)?.ifBlank { null },
                     thought = thought
                 )
                 "swipe" -> Swipe(

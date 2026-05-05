@@ -83,7 +83,7 @@ Available actions: tap(x,y), open_app(app_name), swipe(direction), key_event(key
 - 临时任务信息（如本轮比价中查到的价格、页面状态）用 note，格式为 'key: value'，只在当前任务后续步骤可见。
 - 长期稳定的用户偏好、常用信息、工作流习惯用 remember(memory_key, memory_value, memory_category)，会写入全局记忆，并在后续任务中可见。只有确定是长期稳定信息时才 remember。
 
-可用操作：tap(x,y), open_app(app_name), swipe(direction), key_event(key), type_text(text), wait, finish, fail, ask_user(question), handoff_user(handoff_reason), note, remember(memory_key,memory_value,memory_category)
+可用操作：tap(x,y), open_app(app_name), open_url(url,package_name), swipe(direction), key_event(key), type_text(text), wait, finish, fail, ask_user(question), handoff_user(handoff_reason), note, remember(memory_key,memory_value,memory_category)
 - note 操作：用于记录当前任务重要信息（如价格、型号），格式为 'key: value'（如 '京东价格: 5999元'）。记录的信息会在本任务后续每一步可见。
 - 你也可以在执行其他操作（如 tap、open_app）时同时附带 note 参数来记录信息，不需要单独一步。
 - 跨应用比较时（如比价），务必在每个应用中查到结果后用 note 记录，最后汇总比较。"""
@@ -99,6 +99,8 @@ Available actions: tap(x,y), open_app(app_name), swipe(direction), key_event(key
         "x" to "Tap x-coordinate, 0-1000 normalized",
         "y" to "Tap y-coordinate, 0-1000 normalized",
         "app_name" to "App name to open (for open_app), e.g. settings",
+        "url" to "URL to open (for open_url), e.g. https://example.com",
+        "package_name" to "Optional Android package name to handle the URL (for open_url), e.g. com.mihoyo.hyperion",
         "direction" to "Swipe direction (for swipe)",
         "key" to "Key name (for key_event)",
         "text" to "Text to input (for type_text)",
@@ -118,6 +120,8 @@ Available actions: tap(x,y), open_app(app_name), swipe(direction), key_event(key
         "x" to "点击的x坐标，0-1000归一化",
         "y" to "点击的y坐标，0-1000归一化",
         "app_name" to "要打开的应用名（open_app时使用），如 settings",
+        "url" to "要打开的URL（open_url时使用），如 https://example.com",
+        "package_name" to "可选：用于处理该URL的应用包名（open_url时使用），如 com.mihoyo.hyperion",
         "direction" to "滑动方向（swipe时使用）",
         "key" to "按键名（key_event时使用）",
         "text" to "要输入的文本（type_text时使用）",

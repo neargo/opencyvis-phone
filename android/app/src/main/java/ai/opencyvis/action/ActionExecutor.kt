@@ -62,6 +62,15 @@ class ActionExecutor(
                     ok to result.description
                 }
 
+                is Action.OpenUrl -> {
+                    val result = appLauncher.openUrl(action.url, action.packageName)
+                    val ok = result.packageName != null
+                    if (ok) {
+                        onOpenAppSuccess?.invoke(result.packageName!!)
+                    }
+                    ok to result.description
+                }
+
                 is Action.Swipe -> {
                     val coords = swipeDirections[action.direction.lowercase()]
                     if (coords != null) {
